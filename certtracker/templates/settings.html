@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Settings · Cert Tracker{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+
+<section class="card">
+  <h2>Reminders</h2>
+  <dl class="details">
+    <dt>Sent to</dt><dd>{{ config.DIGEST_TO | join(', ') or 'not configured (set DIGEST_TO)' }}</dd>
+    <dt>Via</dt><dd>{{ config.SMTP_HOST or 'not configured (set SMTP_HOST)' }}:{{ config.SMTP_PORT }}{% if config.SMTP_STARTTLS %} with STARTTLS{% endif %}, from {{ config.MAIL_FROM }}</dd>
+    <dt>Alert at</dt><dd>{{ config.ALERT_THRESHOLDS | join(', ') }} days before expiry, then daily inside {{ config.ALERT_THRESHOLDS | min }} days</dd>
+    <dt>Daily run</dt><dd>{{ config.DAILY_RUN_TIME }} ({{ config.TIMEZONE }}). Weekly summary on {{ ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'][config.SUMMARY_WEEKDAY] }}, sent even when all is well</dd>
+  </dl>
+  <p class="hint">These come from the server's environment file, so changing them is a config change, not a click.</p>
+  <div class="actions">
+    <form method="post" action="{{ url_for('views.test_email') }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="secondary">Send a test email</button></form>
+    <form method="post" action="{{ url_for('views.run_now') }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="secondary">Run the daily checks now</button></form>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Public domains to watch</h2>
+  <p class="hint">Checked daily against public Certificate Transparency logs (crt.sh). Every publicly trusted certificate issued for these domains or their subdomains shows up under <a href="{{ url_for('views.index', view='review') }}">To review</a>, including ones nobody told you about.</p>
+  {% if domains %}
+  <table class="list">
+    <thead><tr><th>Domain</th><th>Last checked</th><th></th></tr></thead>
+    <tbody>{% for d in domains %}
+      <tr><td>{{ d.domain }}</td><td>{{ d.last_checked_at | local or 'not yet' }}{% if d.last_error %}<div class="sub bad-text">{{ d.last_error }}</div>{% endif %}</td>
+      <td><form method="post" action="{{ url_for('views.delete_domain', domain_id=d.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="small link">Remove</button></form></td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% endif %}
+  <form method="post" action="{{ url_for('views.add_domain') }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input name="domain" placeholder="example.ca" required> <button class="small">Watch domain</button>
+  </form>
+  {% if not config.CT_ENABLED %}<p class="flash warn">CT checks are turned off (CT_ENABLED=false).</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>Internal CA import</h2>
+  <p class="hint">Run <code>scripts/Export-AdcsCertificates.ps1</code> on the CA. Best as a scheduled task that posts straight to <code>{{ config.BASE_URL }}/api/import/adcs</code>, so the import doesn't depend on anyone remembering. Or save its CSV and upload it here. New certificates land in <a href="{{ url_for('views.index', view='review') }}">To review</a>. Re-importing is safe.</p>
+  {% if not config.API_TOKEN %}<p class="flash warn">API_TOKEN is not set, so the scheduled-task import is disabled. CSV upload still works.</p>{% endif %}
+  <form method="post" action="{{ url_for('views.upload_adcs') }}" enctype="multipart/form-data" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="file" name="file" accept=".csv" required>
+    <input name="ca" placeholder="CA name (optional)">
+    <button class="small">Import CSV</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Recent runs</h2>
+  {% if runs %}
+  <table class="list">
+    <thead><tr><th>Started</th><th>Result</th><th>Summary</th></tr></thead>
+    <tbody>{% for r in runs %}
+      <tr><td class="nowrap">{{ r.started_at | local }}</td>
+        <td>{% if r.ok is none %}<span class="badge muted">running</span>{% elif r.ok %}<span class="badge ok">ok</span>{% else %}<span class="badge bad">failed</span>{% endif %}</td>
+        <td><div class="pre sub">{{ r.summary or '' }}</div></td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="muted">The scheduler hasn't run yet.</p>{% endif %}
+  <p class="hint">Point your uptime monitor at <code>{{ config.BASE_URL }}/api/health</code>. It returns 503 if the daily run hasn't succeeded in 36 hours.</p>
+</section>
+{% endblock %}

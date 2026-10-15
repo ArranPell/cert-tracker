@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}{{ cert.name }} · Cert Tracker{% endblock %}
+{% macro post(action, label, cls='', fields={}) -%}
+<form method="post" action="{{ action }}" class="inline">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% for k, v in fields.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <button class="{{ cls }}">{{ label }}</button>
+</form>
+{%- endmacro %}
+{% block content %}
+{% set badge = expiry_badge(cert, now) %}
+<div class="head">
+  <div>
+    <h1>{{ cert.name }} <span class="badge {{ badge[0] }}">{{ badge[1] }}</span></h1>
+    <div class="sub">#{{ cert.id }} · {{ SOURCES.get(cert.source, cert.source) }} · expires {{ cert.not_after | local('%A %-d %B %Y') }}{% if cert.owner %} · owner {{ cert.owner }}{% endif %}</div>
+  </div>
+  <div class="head-actions">
+    {% if cert.status == 'unreviewed' %}
+      {{ post(url_for('views.set_status', cert_id=cert.id), 'Track this', '', {'action': 'accept'}) }}
+      {{ post(url_for('views.set_status', cert_id=cert.id), 'Ignore', 'secondary', {'action': 'ignore'}) }}
+    {% elif cert.status == 'active' %}
+      <a class="button" href="#renew" onclick="document.querySelector('#renew details').open = true">Record a renewal</a>
+      {{ post(url_for('views.set_status', cert_id=cert.id), 'Retire', 'secondary', {'action': 'retire'}) }}
+    {% elif cert.status in ('retired', 'ignored') %}
+      {{ post(url_for('views.set_status', cert_id=cert.id), 'Make active again', 'secondary', {'action': 'reactivate'}) }}
+    {% endif %}
+  </div>
+</div>
+
+{% if cert.status == 'replaced' and cert.replaced_by %}
+  <div class="flash ok">Replaced by <a href="{{ url_for('views.cert_detail', cert_id=cert.replaced_by.id) }}">#{{ cert.replaced_by.id }} {{ cert.replaced_by.name }}</a> (expires {{ cert.replaced_by.not_after | local('%Y-%m-%d') }}).</div>
+{% elif cert.status == 'unreviewed' %}
+  <div class="flash warn">Discovered automatically and not tracked yet. Track it to get expiry reminders.</div>
+{% endif %}
+
+{% if cert.renewal_notes %}
+<section class="card renewal-notes"><h2>How to renew</h2><div class="pre">{{ cert.renewal_notes }}</div></section>
+{% endif %}
+
+<section class="card" id="locations">
+  <div class="card-head">
+    <h2>Where it's installed</h2>
+    {% if cert.locations | selectattr('kind', 'equalto', 'endpoint') | list %}{{ post(url_for('views.check_cert', cert_id=cert.id), 'Check all endpoints now', 'secondary') }}{% endif %}
+  </div>
+  {% if cert.locations %}
+  <div class="table-wrap">
+  <table class="list">
+    <thead><tr><th>Location</th><th>Status</th><th>Last checked / confirmed</th><th></th></tr></thead>
+    <tbody>
+    {% for loc in cert.locations %}
+      {% set st = STATE_LABELS.get(loc.check_state, ('muted', loc.check_state)) %}
+      <tr>
+        <td>{{ loc.label }}<div class="sub">{{ 'checked over the network' if loc.kind == 'endpoint' else 'confirmed by a person' }}</div>{% if loc.notes %}<div class="sub pre">{{ loc.notes }}</div>{% endif %}</td>
+        <td><span class="badge {{ st[0] }}">{{ st[1] if not (loc.kind == 'manual' and loc.check_state == 'pending') else 'Renewed — confirm once installed' }}</span>
+          {% if loc.last_error %}<div class="sub">{{ loc.last_error }}</div>{% endif %}
+          {% if loc.check_state in ('newer', 'older', 'mismatch') and loc.last_seen_not_after %}<div class="sub">served cert expires {{ loc.last_seen_not_after | local('%Y-%m-%d') }}</div>{% endif %}
+        </td>
+        <td class="nowrap">
+          {% if loc.kind == 'endpoint' %}{{ loc.last_checked_at | local or 'never' }}{% else %}{{ loc.confirmed_at | local or 'not confirmed' }}{% if loc.confirmed_by %}<div class="sub">{{ loc.confirmed_by }}</div>{% endif %}{% endif %}
+        </td>
+        <td><div class="row-actions">
+          {% if loc.kind == 'endpoint' %}{{ post(url_for('views.check_location', loc_id=loc.id), 'Check', 'small secondary') }}{% endif %}
+          {% if loc.kind == 'manual' and loc.check_state != 'ok' %}{{ post(url_for('views.confirm_location', loc_id=loc.id), 'Confirm installed', 'small') }}{% endif %}
+          {% if loc.check_state == 'newer' %}{{ post(url_for('views.adopt_newer', loc_id=loc.id), 'Record served cert as the renewal', 'small') }}{% endif %}
+          {{ post(url_for('views.delete_location', loc_id=loc.id), 'Remove', 'small link') }}
+        </div></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">No locations recorded. Add every place this certificate is installed. That's how a renewal gets tracked through to the last server.</p>
+  {% endif %}
+
+  <details class="add-location" {{ 'open' if not cert.locations }}>
+    <summary>Add a location</summary>
+    <div class="two-col">
+      <form method="post" action="{{ url_for('views.add_location', cert_id=cert.id) }}" class="card inset">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="kind" value="endpoint">
+        <h3>A server the tracker can check</h3>
+        <p class="hint">Web servers, load balancers, LDAPS (636), RD Gateway, management interfaces. Anything that speaks TLS directly.</p>
+        <label>Host or IP <input name="host" required></label>
+        <label>Port <input name="port" value="443" inputmode="numeric"></label>
+        <label>SNI name <span class="opt">(optional)</span><input name="sni"></label>
+        <label>Label <span class="opt">(optional)</span><input name="name" placeholder="e.g. F5 VIP for intranet"></label>
+        <label>Notes <span class="opt">(optional)</span><input name="notes"></label>
+        <button>Add and check</button>
+      </form>
+      <form method="post" action="{{ url_for('views.add_location', cert_id=cert.id) }}" class="card inset">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="kind" value="manual">
+        <h3>Somewhere a person has to confirm</h3>
+        <p class="hint">Entra/SAML apps, appliances behind other networks, code signing, client certificates, vendor portals.</p>
+        <label>Where <input name="name" required placeholder="e.g. Entra ID enterprise app: Payroll SSO"></label>
+        <label>Notes <span class="opt">(optional)</span><input name="notes"></label>
+        <button>Add (confirmed installed)</button>
+      </form>
+    </div>
+  </details>
+</section>
+
+{% if cert.status == 'active' %}
+<section class="card" id="renew">
+  <details {{ 'open' if renewal_due }}>
+  <summary class="h2">Record a renewal</summary>
+  <p class="hint">The new certificate takes over this record's name, owner and notes, and every location above moves to it, marked pending until a scan or a person confirms it's installed.</p>
+  <div class="two-col">
+    <form method="post" action="{{ url_for('views.renew', cert_id=cert.id) }}" enctype="multipart/form-data" class="card inset">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="mode" value="upload">
+      <h3>Upload or paste the new certificate</h3>
+      <label>File <input type="file" name="file"></label>
+      <label>.pfx password <input type="password" name="password" autocomplete="off"></label>
+      <label>…or PEM <textarea name="pem" rows="4" placeholder="-----BEGIN CERTIFICATE-----"></textarea></label>
+      <button>Record renewal</button>
+    </form>
+    <div>
+      <form method="post" action="{{ url_for('views.renew', cert_id=cert.id) }}" class="card inset">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="mode" value="fetch">
+        <h3>Read it from a server where it's already installed</h3>
+        <label>Host <input name="host" required value="{{ (cert.locations | selectattr('kind', 'equalto', 'endpoint') | map(attribute='host') | first) or '' }}"></label>
+        <label>Port <input name="port" value="443" inputmode="numeric"></label>
+        <label>SNI <span class="opt">(optional)</span><input name="sni"></label>
+        <button>Record renewal</button>
+      </form>
+      {% if newer_candidates %}
+      <form method="post" action="{{ url_for('views.renew', cert_id=cert.id) }}" class="card inset">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="mode" value="existing">
+        <h3>Pick one that's already on record</h3>
+        <select name="new_id">
+          {% for c in newer_candidates[:50] %}<option value="{{ c.id }}">#{{ c.id }} {{ c.name }} ({{ c.status }}, expires {{ c.not_after | local('%Y-%m-%d') }})</option>{% endfor %}
+        </select>
+        <button>Record renewal</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  </details>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-head"><h2>Certificate details</h2>{% if cert.pem %}<a href="{{ url_for('views.download_pem', cert_id=cert.id) }}">Download .crt</a>{% endif %}</div>
+  <dl class="details">
+    <dt>Common name</dt><dd>{{ cert.common_name or '—' }}</dd>
+    <dt>Names (SAN)</dt><dd>{% for s in cert.sans %}<code>{{ s }}</code> {% else %}—{% endfor %}</dd>
+    <dt>Subject</dt><dd>{{ cert.subject or '—' }}</dd>
+    <dt>Issuer</dt><dd>{{ cert.issuer or '—' }}</dd>
+    <dt>Valid</dt><dd>{{ cert.not_before | local or '?' }} → {{ cert.not_after | local }} ({{ config.TIMEZONE }})</dd>
+    <dt>Serial</dt><dd><code>{{ cert.serial or '—' }}</code></dd>
+    <dt>Thumbprint (SHA-1)</dt><dd><code>{{ cert.sha1 or '—' }}</code></dd>
+    <dt>SHA-256</dt><dd><code class="wrap">{{ cert.sha256 or '—' }}</code></dd>
+    <dt>Key</dt><dd>{{ cert.key_info or '—' }}{% if cert.is_ca %} · CA certificate{% endif %}</dd>
+    {% if cert.template %}<dt>Template</dt><dd>{{ cert.template }}</dd>{% endif %}
+    <dt>Added</dt><dd>{{ cert.created_at | local }} ({{ FOUND_VIA.get(cert.discovered_via, cert.discovered_via) }})</dd>
+  </dl>
+  {% if not cert.pem %}
+  <form method="post" action="{{ url_for('views.attach_file', cert_id=cert.id) }}" enctype="multipart/form-data" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <span class="hint">No certificate file on record. Attach it to fill in the details:</span>
+    <input type="file" name="file"> <input type="password" name="password" placeholder=".pfx password" autocomplete="off">
+    <button class="secondary small">Attach</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="card">
+  <details>
+    <summary>Edit name, owner and notes</summary>
+    <form method="post" action="{{ url_for('views.edit_cert', cert_id=cert.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <fieldset class="grid">
+        <label>Display name <input name="name" value="{{ cert.name }}" required maxlength="255"></label>
+        <label>Source <select name="source">{% for key, label in SOURCES.items() %}<option value="{{ key }}" {{ 'selected' if cert.source == key }}>{{ label }}</option>{% endfor %}</select></label>
+        <label>Owner <input name="owner" value="{{ cert.owner or '' }}" maxlength="255"></label>
+        {% if not cert.pem %}<label>Expires on <input type="date" name="not_after" value="{{ cert.not_after.strftime('%Y-%m-%d') }}"></label>{% endif %}
+        <label class="wide">How to renew it <textarea name="renewal_notes" rows="4">{{ cert.renewal_notes or '' }}</textarea></label>
+        <label class="wide">Notes <textarea name="notes" rows="3">{{ cert.notes or '' }}</textarea></label>
+      </fieldset>
+      <button>Save</button>
+    </form>
+  </details>
+  {% if cert.notes %}<div class="pre notes">{{ cert.notes }}</div>{% endif %}
+</section>
+
+<section class="card" id="history">
+  <h2>History</h2>
+  <form method="post" action="{{ url_for('views.add_note', cert_id=cert.id) }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input name="note" placeholder="Add a note to the history (e.g. ordered renewal, ticket number)" class="grow">
+    <button class="secondary small">Add note</button>
+  </form>
+  {% if previous %}
+    <p>Previous certificates: {% for p in previous %}<a href="{{ url_for('views.cert_detail', cert_id=p.id) }}">#{{ p.id }} (valid to {{ p.not_after | local('%Y-%m-%d') }})</a>{{ ', ' if not loop.last }}{% endfor %}</p>
+  {% endif %}
+  <ul class="events">
+    {% for e in cert.events %}
+      <li><span class="when">{{ e.at | local }}</span> <span class="who">{{ e.actor }}</span> {{ e.message }}</li>
+    {% else %}<li class="muted">Nothing yet.</li>{% endfor %}
+  </ul>
+</section>
+{% endblock %}

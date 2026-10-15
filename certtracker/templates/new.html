@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Add certificate · Cert Tracker{% endblock %}
+{% block content %}
+<h1>Add a certificate</h1>
+<nav class="tabs">
+  <a href="{{ url_for('views.new_cert', mode='upload') }}" class="{{ 'on' if mode == 'upload' }}">Upload or paste</a>
+  <a href="{{ url_for('views.new_cert', mode='fetch') }}" class="{{ 'on' if mode == 'fetch' }}">Read from a server</a>
+  <a href="{{ url_for('views.new_cert', mode='manual') }}" class="{{ 'on' if mode == 'manual' }}">Enter by hand</a>
+</nav>
+
+<form method="post" enctype="multipart/form-data" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="mode" value="{{ mode }}">
+
+  {% if mode == 'upload' %}
+  <p class="hint">.cer, .crt, .pem, .der, .p7b or .pfx. Dates, names and thumbprints are read from the file. Private keys are never stored. If you paste a key or upload a .pfx, the key is dropped.</p>
+  <fieldset class="grid">
+    <label>Certificate file <input type="file" name="file"></label>
+    <label>.pfx password <span class="opt">(only for .pfx files)</span><input type="password" name="password" autocomplete="off"></label>
+    <label class="wide">…or paste PEM text
+      <textarea name="pem" rows="6" placeholder="-----BEGIN CERTIFICATE-----">{{ form.get('pem', '') }}</textarea></label>
+    <label class="check wide"><input type="checkbox" name="include_chain" value="1"> Also add the CA certificates in the file (root/intermediate)</label>
+  </fieldset>
+
+  {% elif mode == 'fetch' %}
+  <p class="hint">Connects to the server, reads the certificate it presents, and records that server as a location to keep checking.</p>
+  <fieldset class="grid">
+    <label>Host name or IP <input name="host" value="{{ form.get('host', '') }}" required placeholder="intranet.example.local"></label>
+    <label>Port <input name="port" value="{{ form.get('port', '443') }}" inputmode="numeric"></label>
+    <label>SNI name <span class="opt">(if different from the host)</span><input name="sni" value="{{ form.get('sni', '') }}"></label>
+    <label>Location name <span class="opt">(optional)</span><input name="location_name" value="{{ form.get('location_name', '') }}" placeholder="e.g. IIS on WEB01"></label>
+  </fieldset>
+
+  {% else %}
+  <p class="hint">For certificates you can't easily get the file for. You can upload the file later from the certificate's page.</p>
+  <fieldset class="grid">
+    <label>Expires on <input type="date" name="not_after" value="{{ form.get('not_after', '') }}" required></label>
+    <label>Common name <input name="common_name" value="{{ form.get('common_name', '') }}"></label>
+    <label>Issuer <input name="issuer" value="{{ form.get('issuer', '') }}"></label>
+  </fieldset>
+  {% endif %}
+
+  {% include "_cert_fields.html" %}
+  <div class="actions"><button>Add certificate</button></div>
+</form>
+{% endblock %}

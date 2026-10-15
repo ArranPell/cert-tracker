@@ -1,0 +1,24 @@
+# Two containers from one image: the web app, and the scheduler that runs the daily
+# scan / CT check / email digest. They share the SQLite database in the certdata volume.
+services:
+  web:
+    build: .
+    image: cert-tracker
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - certdata:/data
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    image: cert-tracker
+    env_file: .env
+    command: ["python", "-m", "certtracker", "scheduler"]
+    volumes:
+      - certdata:/data
+    restart: unless-stopped
+
+volumes:
+  certdata:

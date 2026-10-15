@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Cert Tracker{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="{{ url_for('views.index') }}">Cert Tracker</a>
+  <nav>
+    <a href="{{ url_for('views.index') }}">Certificates</a>
+    <a href="{{ url_for('views.index', view='review') }}">To review{% if review_count %} <span class="count">{{ review_count }}</span>{% endif %}</a>
+    <a href="{{ url_for('views.new_cert') }}">Add</a>
+    <a href="{{ url_for('views.settings') }}">Settings</a>
+  </nav>
+  <div class="user">
+    {% if current_user %}{{ current_user.name }}{% if config.AUTH_MODE == 'entra' %} · <a href="{{ url_for('auth.logout') }}">Sign out</a>{% endif %}{% endif %}
+  </div>
+</header>
+<main>
+  {% if config.AUTH_MODE == 'none' %}
+  <div class="flash warn">Sign-in is turned off (AUTH_MODE=none). Fine for trying it out; not for production.</div>
+  {% endif %}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

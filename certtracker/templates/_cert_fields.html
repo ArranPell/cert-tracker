@@ -1,0 +1,15 @@
+<fieldset class="grid">
+  <label>Display name {% if mode != 'manual' %}<span class="opt">(optional; defaults to the common name)</span>{% endif %}
+    <input name="name" value="{{ form.get('name', '') }}" maxlength="255" placeholder="e.g. Intranet wildcard" {{ 'required' if mode == 'manual' }}></label>
+  <label>Source
+    <select name="source">
+      <option value="auto">Work it out from the certificate</option>
+      {% for key, label in SOURCES.items() %}<option value="{{ key }}" {{ 'selected' if form.get('source') == key }}>{{ label }}</option>{% endfor %}
+    </select></label>
+  <label>Owner <span class="opt">(team or person responsible)</span>
+    <input name="owner" value="{{ form.get('owner', '') }}" maxlength="255" placeholder="e.g. Infrastructure"></label>
+  <label class="wide">How to renew it <span class="opt">(steps, vendor portal, who to call)</span>
+    <textarea name="renewal_notes" rows="3">{{ form.get('renewal_notes', '') }}</textarea></label>
+  <label class="wide">Notes
+    <textarea name="notes" rows="2">{{ form.get('notes', '') }}</textarea></label>
+</fieldset>
